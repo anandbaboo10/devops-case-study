@@ -28,12 +28,3 @@ The supplied Azure YAML installs an x86 SDK/runtime, VC++ redistributable, NuGet
 
 ## Fabric review
 The notebook is a portable PySpark starting point, not an imported Fabric workspace artifact. Create a Fabric Lakehouse, place authorized source extracts in Bronze, adapt table paths, run Bronze→Silver→Gold, and build a Power BI report over `gold_dora_service_week`. Workspace deployment, credentials, semantic model, dashboard screenshots, and live Fabric execution are not represented here.
-
-## Limitations / assumptions
-Supplied workbook is small and has partial/ambiguous event linkage: 164 commits, 350 build records, 11 incidents, two projects; commits reference `build_sk`, while builds use `build_id`; verify key mapping and deployment semantics before joining. Builds lack a visible result/status and explicit production deployment event. Incidents include only three marked deployment-caused; one listed resolution precedes its start, so duration validation is essential. Therefore the workbook alone cannot support defensible DORA deployment frequency, change failure rate, or end-to-end lead time without source-system clarification and deployment records. Never publish raw workbook or PII; seek approval and sanitize.
-
-## Review and submission
-Inspect source, run tests and DQ checks, review workflow permissions and docs, and replace the synthetic fixtures only with approved, sanitized extracts. Replace placeholder Git remote with your authorized repository URL, then commit and record the final commit hash/tag. No actual GitHub push or hosted workflow run was performed by this artifact generation.
-
-## AI Use Statement
-OpenAI assistant supported initial code/document drafting and structure. Candidate must independently review, run, validate, and be prepared to explain every implementation, assumption, metric definition, and recommendation before submission.
