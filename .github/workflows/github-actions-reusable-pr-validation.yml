@@ -1,0 +1,113 @@
+name: Reusable .NET x86 PR validation
+
+on:
+  workflow_call:
+    inputs:
+      solution:
+        description: Path to solution file
+        required: false
+        type: string
+        default: '**/*.sln'
+      nuget-config:
+        description: Path to NuGet config
+        required: false
+        type: string
+        default: nuget.config
+      coverlet-settings:
+        description: Path to Coverlet runsettings
+        required: false
+        type: string
+        default: coverlet.runsettings
+    outputs:
+      artifact-name:
+        description: Name of uploaded validation artifact
+        value: ${{ jobs.validate.outputs.artifact-name }}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    outputs:
+      artifact-name: ${{ steps.artifact-info.outputs.name }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install .NET 8 x86 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+          architecture: x86
+
+      - name: Install Visual C++ Redistributable x86
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'vc_redist.x86.exe'
+          Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x86.exe' -OutFile $installer
+          $process = Start-Process -FilePath $installer -ArgumentList '/install','/quiet','/norestart' -Wait -PassThru
+          if ($process.ExitCode -notin @(0, 3010)) { throw "VC++ Redistributable installer failed: $($process.ExitCode)" }
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: NuGet restore
+        shell: pwsh
+        env:
+          SOLUTION_PATTERN: ${{ inputs.solution }}
+          NUGET_CONFIG: ${{ inputs.nuget-config }}
+        run: |
+          $solution = Get-ChildItem -Path . -Filter *.sln -Recurse | Where-Object { $_.FullName -like (Join-Path $env:GITHUB_WORKSPACE $env:SOLUTION_PATTERN) } | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $solution) { throw "No solution found matching $env:SOLUTION_PATTERN" }
+          nuget restore $solution -ConfigFile $env:NUGET_CONFIG
+
+      - name: Build solution (x86, Release)
+        shell: pwsh
+        env:
+          SOLUTION_PATTERN: ${{ inputs.solution }}
+        run: |
+          $solution = Get-ChildItem -Path . -Filter *.sln -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $solution) { throw 'No .sln file found.' }
+          msbuild $solution /m /p:Configuration=Release /p:Platform=x86 /p:PlatformToolset=v143 /p:PreferredToolArchitecture=x86
+
+      - name: Stage build output
+        shell: pwsh
+        env:
+          SOLUTION_PATTERN: ${{ inputs.solution }}
+        run: |
+          $solution = Get-ChildItem -Path . -Filter *.sln -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          $stage = Join-Path $env:GITHUB_WORKSPACE 'artifacts'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          msbuild $solution /m /p:Configuration=Release /p:Platform=x86 /p:PlatformToolset=v143 "/p:OutputPath=$stage\\"
+
+      - name: Run x86 tests with coverage
+        shell: pwsh
+        env:
+          DOTNET_ROOT: C:\Program Files (x86)\dotnet
+          DOTNET_ROOT_X86: C:\Program Files (x86)\dotnet
+          COVERLET_SETTINGS: ${{ inputs.coverlet-settings }}
+        run: |
+          $stage = Join-Path $env:GITHUB_WORKSPACE 'artifacts'
+          $tests = Get-ChildItem -Path $stage -Filter '*Tests.dll' -Recurse | Where-Object { $_.Name -notmatch 'TestAdapter' }
+          if (-not $tests) { throw 'No test assemblies found in staged build output.' }
+          foreach ($test in $tests) {
+            & dotnet test $test.FullName --no-build --configuration Release --settings $env:COVERLET_SETTINGS --collect:"XPlat Code Coverage" --results-directory (Join-Path $env:GITHUB_WORKSPACE 'TestResults')
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Set artifact output
+        id: artifact-info
+        shell: pwsh
+        run: "Add-Content $env:GITHUB_OUTPUT ('name=pr-validation-' + $env:GITHUB_RUN_NUMBER)"
+
+      - name: Upload build and test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-validation-${{ github.run_number }}
+          path: |
+            artifacts/**
+            TestResults/**
+          if-no-files-found: warn
+          retention-days: 14
