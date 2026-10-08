@@ -1,0 +1,85 @@
+name: PR validation
+
+on:
+  pull_request:
+    branches:
+      - main
+    # Azure `drafts: false` equivalent: skip draft PRs.
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-validation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    if: github.event.pull_request.draft == false
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install .NET 8 x86 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+          architecture: x86
+
+      - name: Install Visual C++ Redistributable x86
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'vc_redist.x86.exe'
+          Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x86.exe' -OutFile $installer
+          $process = Start-Process -FilePath $installer -ArgumentList '/install','/quiet','/norestart' -Wait -PassThru
+          if ($process.ExitCode -notin @(0, 3010)) { throw "VC++ Redistributable installer failed: $($process.ExitCode)" }
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: NuGet restore
+        shell: pwsh
+        run: nuget restore (Get-ChildItem -Path . -Filter *.sln -Recurse | Select-Object -First 1 -ExpandProperty FullName) -ConfigFile nuget.config
+
+      - name: Build solution (x86, Release)
+        shell: pwsh
+        run: |
+          $solution = Get-ChildItem -Path . -Filter *.sln -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $solution) { throw 'No .sln file found.' }
+          msbuild $solution /m /p:Configuration=Release /p:Platform=x86 /p:PlatformToolset=v143 /p:PreferredToolArchitecture=x86
+
+      - name: Publish build output to staging directory
+        shell: pwsh
+        run: |
+          $solution = Get-ChildItem -Path . -Filter *.sln -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          $stage = Join-Path $env:GITHUB_WORKSPACE 'artifacts'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          msbuild $solution /m /p:Configuration=Release /p:Platform=x86 /p:PlatformToolset=v143 "/p:OutputPath=$stage\\"
+
+      - name: Run x86 tests with coverage
+        shell: pwsh
+        env:
+          DOTNET_ROOT: C:\Program Files (x86)\dotnet
+          DOTNET_ROOT_X86: C:\Program Files (x86)\dotnet
+        run: |
+          $stage = Join-Path $env:GITHUB_WORKSPACE 'artifacts'
+          $settings = Join-Path $env:GITHUB_WORKSPACE 'coverlet.runsettings'
+          $tests = Get-ChildItem -Path $stage -Filter '*Tests.dll' -Recurse | Where-Object { $_.Name -notmatch 'TestAdapter' }
+          if (-not $tests) { throw 'No test assemblies found in staged build output.' }
+          foreach ($test in $tests) {
+            & dotnet test $test.FullName --no-build --configuration Release --settings $settings --collect:"XPlat Code Coverage" --results-directory (Join-Path $env:GITHUB_WORKSPACE 'TestResults')
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Upload staged build and coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-validation-${{ github.run_number }}
+          path: |
+            artifacts/**
+            TestResults/**
+          if-no-files-found: warn
+          retention-days: 14
