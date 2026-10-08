@@ -1,0 +1,7 @@
+deployment_id,service,environment,deployed_at,lead_time_hours,change_failed
+d001,service-a,prod,2024-10-01T10:00:00Z,20,0
+d002,service-a,prod,2024-10-03T10:00:00Z,31,1
+d003,service-a,prod,2024-10-08T10:00:00Z,18,0
+d004,service-b,prod,2024-10-02T10:00:00Z,72,0
+d005,service-b,prod,2024-10-09T10:00:00Z,44,0
+d006,service-b,prod,2024-10-11T10:00:00Z,28,1

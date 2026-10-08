@@ -1,0 +1,10 @@
+# DORA metric contract (proposed)
+
+| Metric | Grain / formula | Source and rules | Owner / limitations |
+|---|---|---|---|
+| Deployment frequency | Service × production environment × week; count distinct successful production deployment events per calendar week. | Deployment event log, release/deployment ID, service, env, outcome, UTC timestamp; exclude non-prod, retries and failed attempts. | Service owner accountable for event classification; platform data product steward owns pipeline. Build completion is not automatically a production deployment. |
+| Lead time for changes | Per production deployment, elapsed time from first commit included in deployed change to successful production deployment; report median and p85 by service/week. | Deployment-to-commit/PR linkage and commit timestamp in UTC; exclude orphan deployments from percentile, report linkage coverage. | Service owner validates linkage; commit timestamp choice must be consistent; authored date may be rewritten/backdated. |
+| Change failure rate | Count production deployments causing a qualifying incident / all production deployments in same cohort; define incident attribution window and deduplicate incident IDs. | Deployment records joined to incident records by explicit deployment ID or adjudicated attribution; failed changes need unambiguous incident criteria. | Incident commander/Service owner adjudicates causal link; current workbook's Boolean alone is not enough. |
+| Mean time to restore | Mean elapsed hours from customer-impact start to service restoration for qualifying incidents; report count and median alongside mean. | Incident lifecycle timestamps, timezone normalization, status and impact rules; unresolved events excluded from closed-period mean but shown separately. | Incident management process owner owns timestamp semantics; sample has a negative interval, must quarantine. |
+
+Small counts require denominators and confidence cautions; don't rank teams or use as individual performance targets. Preserve lineage and source freshness; show coverage, unknowns, and exclusions alongside metric values.
